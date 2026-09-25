@@ -109,7 +109,7 @@ function calendarView() {
   const personal = page === "calendar",
     dates = Array.from({ length: 7 }, (_, i) => datePlus(week, i));
   const ids = personal ? [me()] : members().map((m) => m.user_id);
-  return `<div class="toolbar card"><div class="toolbar">${personal ? "<strong>Mon agenda</strong>" : groupSelect()}<div>${button("←", "week", "-7")} <span>Semaine du ${esc(week.split("-").reverse().join("/"))}</span> ${button("→", "week", "7")}</div>${button("+ Ajouter un cours", "add-event", "", "primary")}</div></div>${
+  return `<div class="toolbar card"><div class="toolbar">${personal ? "<strong>Mon agenda</strong>" : groupSelect()}<div>${button("←", "week", "-7")} <span>Semaine du ${esc(week.split("-").reverse().join("/"))}</span> ${button("→", "week", "7")}</div>${personal ? button("⇧ Importer", "import-agenda") : ""}${button("+ Ajouter un cours", "add-event", "", "primary")}</div></div>${
     !personal && !group()
       ? `<div class="card empty"><h2>Tout commence par un groupe</h2><p>Crée un groupe ou rejoins tes amis avec leur lien d’invitation.</p>${button("Voir mes groupes", "nav", "groups", "primary")}</div>`
       : `<div class="${personal ? "" : "grid"}"><div><div class="card"><div class="between"><h2>${personal ? "Ma semaine" : esc(group().name)}</h2><span class="pill">${ids.length} ${personal ? "agenda" : "membre(s)"}</span></div><div class="scroll"><div class="calendar">${dates
@@ -266,6 +266,27 @@ async function action(a, id, target) {
       break;
     case "add-event":
       eventForm();
+      break;
+    case "import-agenda":
+      modal(`
+        <h2>Importer mon emploi du temps</h2>
+        <p class="muted">Ajoute une capture/photo (PNG ou JPG) ou un PDF. L'import crée des cours récurrents : choisis Q1 ou Q2 pour les cours en alternance.</p>
+        <form data-form="import-agenda">
+          <label>Fichier<input name="agenda" type="file" accept="image/png,image/jpeg,application/pdf" required></label>
+          <div class="row">
+            ${field("Début de la période", "recurrence_start", "date", week, "required")}
+            ${field("Fin de la période", "recurrence_end", "date", datePlus(week, 300), "required")}
+          </div>
+          <label>Alternance par défaut
+            <select name="parity">
+              <option value="all">Toutes les semaines</option>
+              <option value="q1">Q1</option>
+              <option value="q2">Q2</option>
+            </select>
+          </label>
+          <p class="muted">Après sélection, Trouve essaie d'extraire le texte du fichier. Tu pourras vérifier les cours avant de les enregistrer.</p>
+          <div class="actions"><button class="primary" type="submit">Analyser le fichier</button>${button("Annuler", "close")}</div>
+        </form>`);
       break;
     case "event": {
       const e = data.events.find((e) => e.id === id),
@@ -431,6 +452,25 @@ async function submit(form) {
         notify("Si ce compte existe, un lien a été envoyé.");
       } else check(await db.auth.signInWithPassword(f));
       break;
+    case "import-agenda": {
+      const file = form.querySelector('input[name="agenda"]').files[0];
+      if (!file) throw new Error("Choisis une image ou un PDF.");
+      if (file.size > 12 * 1024 * 1024) throw new Error("Le fichier dépasse 12 Mo.");
+      const start = f.recurrence_start, end = f.recurrence_end;
+      if (end < start) throw new Error("La date de fin doit suivre la date de début.");
+      const reader = new FileReader();
+      const dataUrl = await new Promise((resolve, reject) => {
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error("Impossible de lire le fichier."));
+        reader.readAsDataURL(file);
+      });
+      sessionStorage.setItem("trouve-agenda-import", JSON.stringify({
+        name: file.name, type: file.type, dataUrl, start, end, parity: f.parity,
+      }));
+      $("#dialog").close();
+      notify("Fichier prêt. L’analyse automatique sera disponible dès que le service de lecture est configuré.");
+      break;
+    }
     case "profile":
       check(
         await db
