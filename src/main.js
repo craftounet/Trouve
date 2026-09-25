@@ -210,7 +210,7 @@ async function pdfAgenda(file, parityDefault) {
   const items=tc.items.map(x=>({text:x.str.trim(),x:x.transform[4],y:vp.height-x.transform[5],w:x.width,h:Math.abs(x.height||x.transform[3]||8)})).filter(x=>x.text);
   const dayNames=["lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"];
   const headers=dayNames.map((d,i)=>{const x=items.find(v=>v.text.toLowerCase()===d);return x?{i,x:x.x+x.w/2,y:x.y}:null}).filter(Boolean).sort((a,b)=>a.x-b.x);
-  const clocks=items.map(v=>{const m=v.text.match(/^(\\d{1,2})h(\\d{2})$/i);return m?{m:+m[1]*60 + +m[2],y:v.y}:null}).filter(Boolean).sort((a,b)=>a.y-b.y);
+  const clocks=items.map(v=>{const m=v.text.match(/^(\d{1,2})h(\d{2})$/i);return m?{m:+m[1]*60 + +m[2],y:v.y}:null}).filter(Boolean).sort((a,b)=>a.y-b.y);
   if(headers.length<5||clocks.length<4) throw new Error("La grille du PDF n’a pas pu être reconnue.");
   const minuteAt=y=>{let best=clocks[0];for(let i=0;i<clocks.length-1;i++){const a=clocks[i],b=clocks[i+1];if(y>=a.y&&y<=b.y)return Math.round((a.m+(y-a.y)*(b.m-a.m)/(b.y-a.y))/5)*5;if(Math.abs(y-a.y)<Math.abs(y-best.y))best=a}return best.m};
   const xBounds=headers.map((h,i)=>({day:h.i,left:i?(headers[i-1].x+h.x)/2:h.x-(headers[1].x-h.x)/2,right:i<headers.length-1?(h.x+headers[i+1].x)/2:h.x+(h.x-headers[i-1].x)/2,top:h.y}));
@@ -226,13 +226,13 @@ async function pdfAgenda(file, parityDefault) {
       const top=cuts[k],bot=cuts[k+1]; if(bot-top<12) continue;
       const block=ci.filter(v=>v.y>=top-2&&v.y<bot-2).sort((a,b)=>a.y-b.y||a.x-b.x);
       if(!block.length) continue;
-      const txt=block.map(v=>v.text).join(" ").replace(/\\s+/g," ").trim();
+      const txt=block.map(v=>v.text).join(" ").replace(/\s+/g," ").trim();
       if(txt.length<3||/ACCES SEL|SELF|Semestre/i.test(txt)) continue;
       const subject=block.find(v=>/^[A-ZÉÈÀÙÇ][A-ZÉÈÀÙÇ0-9 .&-]{3,}$/.test(v.text)&&!/^Q[12]$/.test(v.text));
       if(!subject) continue;
-      const q=/\\bQ1\\b/i.test(txt)?"q1":/\\bQ2\\b/i.test(txt)?"q2":parityDefault;
-      const teacher=block.find(v=>/^[A-ZÉÈÀÙÇ-]+ [A-Z]\\.?$/.test(v.text))?.text||"";
-      const room=block.map(v=>v.text).find(t=>/^(?:\\d{2,3}[A-Z]*|T\\d+|PHY-TP|\\d+ NSI\\/SNT)$/i.test(t))||"";
+      const q=/\bQ1\b/i.test(txt)?"q1":/\bQ2\b/i.test(txt)?"q2":parityDefault;
+      const teacher=block.find(v=>/^[A-ZÉÈÀÙÇ-]+ [A-Z]\.?$/.test(v.text))?.text||"";
+      const room=block.map(v=>v.text).find(t=>/^(?:\d{2,3}[A-Z]*|T\d+|PHY-TP|\d+ NSI\\/SNT)$/i.test(t))||"";
       const st=minuteAt(top), en=minuteAt(bot);
       if(en>st&&st>=480&&en<=1200) events.push({title:subject.text.slice(0,120),teacher,room,day_of_week:col.day,start_time:clock(st),end_time:clock(en),parity:q});
     }
