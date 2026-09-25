@@ -214,7 +214,7 @@ function parseAgendaWords(words, width, height, parityDefault) {
   const usable=words.filter(w=>w.confidence>35 && w.text?.trim());
   const dayNames=["lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"];
   const headers=dayNames.map((d,i)=>{
-    const w=usable.find(x=>x.text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").includes(d));
+    const w=usable.find(x=>x.text.toLowerCase().includes(d));
     return w ? {i,x:(w.bbox.x0+w.bbox.x1)/2,y:w.bbox.y1} : null;
   }).filter(Boolean);
   if(headers.length<5) throw new Error("Je n’ai pas reconnu les colonnes des jours. Essaie une capture plus nette.");
