@@ -178,6 +178,86 @@ function groupsView() {
 function profileView() {
   return `<div class="card profile-form"><form data-form="profile">${field("Prénom ou pseudo", "username", "text", name(me()), 'required minlength="2" maxlength="60"')}<p class="muted">${esc(session.user.email)}</p><button class="primary">Enregistrer</button></form></div>`;
 }
+function importPreview(events, start, end) {
+  modal(`<h2>Vérifier l’import</h2><p class="muted">${events.length} cours détecté(s). Corrige si besoin avant l’enregistrement.</p>
+  <form data-form="confirm-import" data-start="${esc(start)}" data-end="${esc(end)}">
+    <div class="import-list">${events.map((e,i)=>`<div class="import-row">
+      <input name="title_${i}" value="${esc(e.title)}" required aria-label="Matière">
+      <select name="day_${i}">${days.map((d,j)=>`<option value="${j}" ${j===e.day_of_week?"selected":""}>${d}</option>`).join("")}</select>
+      <input name="start_${i}" type="time" value="${e.start_time}" required>
+      <input name="end_${i}" type="time" value="${e.end_time}" required>
+      <input name="teacher_${i}" value="${esc(e.teacher||"")}" placeholder="Prof">
+      <input name="room_${i}" value="${esc(e.room||"")}" placeholder="Salle">
+      <select name="parity_${i}"><option value="all" ${e.parity==="all"?"selected":""}>Toutes</option><option value="q1" ${e.parity==="q1"?"selected":""}>Q1</option><option value="q2" ${e.parity==="q2"?"selected":""}>Q2</option></select>
+    </div>`).join("")}</div>
+    <input type="hidden" name="count" value="${events.length}">
+    <div class="actions"><button class="primary" type="submit">Importer les cours</button>${button("Annuler","close")}</div>
+  </form>`);
+}
+function loadScript(src) {
+  return new Promise((resolve,reject)=>{
+    const existing=[...document.scripts].find(s=>s.src===src);
+    if(existing){ if(window.Tesseract) return resolve(); existing.addEventListener("load",resolve,{once:true}); return; }
+    const s=document.createElement("script"); s.src=src; s.onload=resolve; s.onerror=()=>reject(new Error("Impossible de charger le lecteur de documents.")); document.head.appendChild(s);
+  });
+}
+async function imageFromPdf(file) {
+  const pdfjs = await import(/* @vite-ignore */ "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs");
+  pdfjs.GlobalWorkerOptions.workerSrc="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
+  const pdf=await pdfjs.getDocument({data:await file.arrayBuffer()}).promise;
+  const page=await pdf.getPage(1), viewport=page.getViewport({scale:2});
+  const canvas=document.createElement("canvas"); canvas.width=viewport.width; canvas.height=viewport.height;
+  await page.render({canvasContext:canvas.getContext("2d"),viewport}).promise;
+  return canvas.toDataURL("image/png");
+}
+function parseAgendaWords(words, width, height, parityDefault) {
+  const usable=words.filter(w=>w.confidence>35 && w.text?.trim());
+  const dayNames=["lundi","mardi","mercredi","jeudi","vendredi","samedi","dimanche"];
+  const headers=dayNames.map((d,i)=>{
+    const w=usable.find(x=>x.text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").includes(d));
+    return w ? {i,x:(w.bbox.x0+w.bbox.x1)/2,y:w.bbox.y1} : null;
+  }).filter(Boolean);
+  if(headers.length<5) throw new Error("Je n’ai pas reconnu les colonnes des jours. Essaie une capture plus nette.");
+  headers.sort((a,b)=>a.x-b.x);
+  const times=usable.map(w=>{const m=w.text.match(/^(\d{1,2})[:h](\d{2})$/i);return m?{m:Number(m[1])*60+Number(m[2]),y:(w.bbox.y0+w.bbox.y1)/2}:null}).filter(Boolean);
+  if(times.length<4) throw new Error("Je n’ai pas reconnu assez d’horaires.");
+  const yMin=Math.min(...times.map(t=>t.y)), yMax=Math.max(...times.map(t=>t.y));
+  const mMin=Math.min(...times.map(t=>t.m)), mMax=Math.max(...times.map(t=>t.m));
+  const minuteAt=y=>Math.round((mMin+(y-yMin)*(mMax-mMin)/(yMax-yMin))/5)*5;
+  const bounds=headers.map((h,i)=>({i:h.i,left:i? (headers[i-1].x+h.x)/2:Math.max(0,h.x-(headers[1].x-h.x)/2),right:i<headers.length-1?(h.x+headers[i+1].x)/2:Math.min(width,h.x+(h.x-headers[i-1].x)/2),top:h.y}));
+  const byDay=bounds.map(b=>usable.filter(w=>{const x=(w.bbox.x0+w.bbox.x1)/2;return x>b.left&&x<b.right&&w.bbox.y0>b.top+4&&!/^\d{1,2}[:h]\d{2}$/i.test(w.text);}));
+  const events=[];
+  byDay.forEach((ws,di)=>{
+    ws.sort((x,y)=>x.bbox.y0-y.bbox.y0);
+    const lines=[];
+    for(const w of ws){let line=lines.find(l=>Math.abs(l.y-w.bbox.y0)<12);if(!line){line={y:w.bbox.y0,y1:w.bbox.y1,words:[]};lines.push(line)} line.words.push(w);line.y1=Math.max(line.y1,w.bbox.y1);}
+    const clusters=[];
+    for(const l of lines){let cl=clusters.at(-1);if(!cl||l.y-cl.y1>22){cl={y:l.y,y1:l.y1,lines:[]};clusters.push(cl)}cl.lines.push(l);cl.y1=l.y1;}
+    for(const cl of clusters){
+      const text=cl.lines.map(l=>l.words.sort((a,b)=>a.bbox.x0-b.bbox.x0).map(w=>w.text).join(" ")).join(" ").trim();
+      if(text.length<3) continue;
+      const low=text.toLowerCase(); if(/semaine|pause|repas|dejeuner|récré|recre/.test(low)) continue;
+      const start=minuteAt(cl.y), end=Math.max(start+30,minuteAt(cl.y1));
+      if(start<360||start>1200||end>1320) continue;
+      const parity=/\bq\s*1\b/i.test(text)?"q1":/\bq\s*2\b/i.test(text)?"q2":parityDefault;
+      const clean=text.replace(/\bQ\s*[12]\b/ig,"").trim();
+      const room=(clean.match(/(?:salle|lab(?:o)?|gymnase)\s*[:.-]?\s*([\w-]+)/i)||[])[1]||"";
+      events.push({title:clean.slice(0,120),teacher:"",room,day_of_week:bounds[di].i,start_time:clock(start),end_time:clock(end),parity});
+    }
+  });
+  if(!events.length) throw new Error("Aucun cours n’a été détecté. Essaie une image plus nette.");
+  return events;
+}
+async function analyzeAgenda(file, parity) {
+  let source=file;
+  if(file.type==="application/pdf") source=await imageFromPdf(file);
+  await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js");
+  notify("Lecture de l’emploi du temps… cela peut prendre quelques secondes.");
+  const result=await window.Tesseract.recognize(source,"fra");
+  const words=result.data.words||[];
+  const width=result.data.imageSize?.width||1000, height=result.data.imageSize?.height||1000;
+  return parseAgendaWords(words,width,height,parity);
+}
 function eventForm(e = {}) {
   modal(
     `<h2>${e.id ? "Modifier le cours" : "Ajouter un cours"}</h2><form data-form="event" data-id="${e.id || ""}">${field("Matière", "title", "text", e.title, 'required maxlength="120"')}<div class="row">${field("Professeur", "teacher", "text", e.teacher, 'maxlength="120"')}${field("Salle", "room", "text", e.room, 'maxlength="80"')}</div><label>Jour<select name="day_of_week">${days.map((d, i) => `<option value="${i}" ${e.day_of_week === i ? "selected" : ""}>${d}</option>`).join("")}</select></label><div class="row">${field("Début", "start_time", "time", e.start_time || "08:00", "required")}${field("Fin", "end_time", "time", e.end_time || "10:00", "required")}</div><div class="row">${field("À partir du", "recurrence_start", "date", e.recurrence_start || parisToday(), "required")}${field("Jusqu’au (facultatif)", "recurrence_end", "date", e.recurrence_end)}</div><div class="actions"><button class="primary">Enregistrer</button>${button("Annuler", "close")}</div></form>`,
@@ -458,7 +538,7 @@ async function submit(form) {
       if (file.size > 12 * 1024 * 1024) throw new Error("Le fichier dépasse 12 Mo.");
       const start = f.recurrence_start, end = f.recurrence_end;
       if (end < start) throw new Error("La date de fin doit suivre la date de début.");
-      const reader = new FileReader();
+      const events = await analyzeAgenda(file, f.parity);\n      importPreview(events, start, end);\n      break;\n      const reader = new FileReader();
       const dataUrl = await new Promise((resolve, reject) => {
         reader.onload = () => resolve(reader.result);
         reader.onerror = () => reject(new Error("Impossible de lire le fichier."));
@@ -470,6 +550,22 @@ async function submit(form) {
       $("#dialog").close();
       notify("Fichier prêt. L’analyse automatique sera disponible dès que le service de lecture est configuré.");
       break;
+    }
+    case "confirm-import": {
+      const count=Number(f.count), rows=[];
+      for(let i=0;i<count;i++){
+        if(f[`end_${i}`]<=f[`start_${i}`]) throw new Error("Un cours a une heure de fin invalide.");
+        const parity=f[`parity_${i}`];
+        rows.push({
+          user_id:me(), title:f[`title_${i}`].trim(), teacher:(f[`teacher_${i}`]||"").trim(),
+          room:(f[`room_${i}`]||"").trim(), day_of_week:Number(f[`day_${i}`]),
+          start_time:f[`start_${i}`], end_time:f[`end_${i}`],
+          recurrence_start: parity==="q2" ? datePlus(form.dataset.start,7) : form.dataset.start,
+          recurrence_end:form.dataset.end, recurrence_interval_weeks:parity==="all"?1:2,
+        });
+      }
+      check(await db.from("events").insert(rows));
+      $("#dialog").close(); await load(); notify(`${rows.length} cours importé(s) dans ton agenda.`); break;
     }
     case "profile":
       check(
