@@ -232,7 +232,7 @@ async function pdfAgenda(file, parityDefault) {
       if(!subject) continue;
       const q=/\bQ1\b/i.test(txt)?"q1":/\bQ2\b/i.test(txt)?"q2":parityDefault;
       const teacher=block.find(v=>/^[A-ZÉÈÀÙÇ-]+ [A-Z]\.?$/.test(v.text))?.text||"";
-      const room=block.map(v=>v.text).find(t=>/^(?:\d{2,3}[A-Z]*|T\d+|PHY-TP|\d+ NSI\\/SNT)$/i.test(t))||"";
+      const room=block.map(v=>v.text).find(t=>/^(?:\d{2,3}[A-Z]*|T\d+|PHY-TP|\d+ NSI[/]SNT)$/i.test(t))||"";
       const st=minuteAt(top), en=minuteAt(bot);
       if(en>st&&st>=480&&en<=1200) events.push({title:subject.text.slice(0,120),teacher,room,day_of_week:col.day,start_time:clock(st),end_time:clock(en),parity:q});
     }
