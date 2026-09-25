@@ -538,17 +538,8 @@ async function submit(form) {
       if (file.size > 12 * 1024 * 1024) throw new Error("Le fichier dépasse 12 Mo.");
       const start = f.recurrence_start, end = f.recurrence_end;
       if (end < start) throw new Error("La date de fin doit suivre la date de début.");
-      const events = await analyzeAgenda(file, f.parity);\n      importPreview(events, start, end);\n      break;\n      const reader = new FileReader();
-      const dataUrl = await new Promise((resolve, reject) => {
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(new Error("Impossible de lire le fichier."));
-        reader.readAsDataURL(file);
-      });
-      sessionStorage.setItem("trouve-agenda-import", JSON.stringify({
-        name: file.name, type: file.type, dataUrl, start, end, parity: f.parity,
-      }));
-      $("#dialog").close();
-      notify("Fichier prêt. L’analyse automatique sera disponible dès que le service de lecture est configuré.");
+      const events = await analyzeAgenda(file, f.parity);
+      importPreview(events, start, end);
       break;
     }
     case "confirm-import": {
