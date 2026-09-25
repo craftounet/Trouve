@@ -537,12 +537,33 @@ setInterval(() => {
 }, 30000);
 render();
 if (db) {
+  // Read the persisted session explicitly on startup. This avoids depending on
+  // INITIAL_SESSION timing in static hosts such as GitHub Pages.
+  db.auth
+    .getSession()
+    .then(({ data: { session: initialSession }, error }) => {
+      if (error) throw error;
+      session = initialSession;
+      if (session) {
+        loading = true;
+        render();
+        return load().then(connect);
+      }
+      render();
+    })
+    .catch((e) => {
+      loading = false;
+      render();
+      notify(e.message || "Impossible d’initialiser la connexion.");
+    });
+
   db.auth.onAuthStateChange((event, s) => {
     const changed = session?.user.id !== s?.user.id;
     session = s;
     if (event === "PASSWORD_RECOVERY") recovery = true;
     if (!s) {
       version++;
+      loading = false;
       data = Object.fromEntries(Object.keys(data).map((k) => [k, []]));
       groupId = "";
       if (channel) {
@@ -551,13 +572,20 @@ if (db) {
       }
       $("#dialog").close();
       render();
-    } else if (changed || event === "PASSWORD_RECOVERY") {
+    } else if (
+      event !== "INITIAL_SESSION" &&
+      (changed || event === "PASSWORD_RECOVERY")
+    ) {
       loading = true;
       render();
       setTimeout(() => {
         load()
           .then(connect)
-          .catch((e) => notify(e.message));
+          .catch((e) => {
+            loading = false;
+            render();
+            notify(e.message);
+          });
       }, 0);
     }
   });
