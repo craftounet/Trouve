@@ -30,7 +30,8 @@ export function occurs(e, date) {
   return (
     e.day_of_week === (new Date(date + "T12:00:00Z").getUTCDay() + 6) % 7 &&
     date >= e.recurrence_start &&
-    (!e.recurrence_end || date <= e.recurrence_end)
+    (!e.recurrence_end || date <= e.recurrence_end) &&
+    Math.floor((new Date(date + "T12:00:00Z") - new Date(e.recurrence_start + "T12:00:00Z")) / 604800000) % (e.recurrence_interval_weeks || 1) === 0
   );
 }
 export function commonSlots({
